@@ -32,7 +32,7 @@ class Client:
 
     def disconnect(self):
         if self.server_socket:
-            self.server_socket.close()
+            self.server_socket.shutdown(socket.SHUT_RDWR)
 
     def send_fruit_records(self, input_file):
         logging.info("Sending fruit records")

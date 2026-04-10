@@ -81,9 +81,9 @@ def handle_client_response(client_list):
 
 
 def handle_sigterm(server_socket, client_list, sigterm_received):
-    server_socket.close()
+    server_socket.shutdown(socket.SHUT_RDWR)
     for [_, client_socket] in client_list:
-        client_socket.close()
+        client_socket.shutdown(socket.SHUT_RDWR)
     sigterm_received.value = 1
 
 
