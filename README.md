@@ -79,3 +79,17 @@ Al momento de la evaluación y ejecución de las pruebas se **descartarán** o *
 - La implementación del protocolo de comunicación externo y `FruitItem`.
 
 Redactar un breve informe explicando el modo en que se coordinan las instancias de Sum y Aggregation, así como el modo en el que el sistema escala respecto a los clientes y a la cantidad de controles.
+
+---
+
+# Resolución
+
+Nombre: Bustamante Gonzalo Manuel
+DNI: 43.086.565
+Padrón: 105.011
+
+## Introducción
+
+Se realiza la implementación del Trabajo Práctico de coordinación dado por la materia. Este repositorio es un *fork* del siguiente repositorio: <https://github.com/7574-sistemas-distribuidos/tp-coordinacion>.
+
+El trabajo se realizará en Python ya que el Trabajo Práctico de MOM fue realizado en dicho lenguaje y se busca reutilizar dicho código.
