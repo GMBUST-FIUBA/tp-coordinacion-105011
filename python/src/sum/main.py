@@ -79,7 +79,7 @@ class SumFilter:
         pass
 
     def __get_shutdown_retry_backoff(self, current_retries):
-        RETRY_SHUT_DOWN_TIME_SEC = 100
+        RETRY_SHUT_DOWN_TIME_SEC = 0.1
         return RETRY_SHUT_DOWN_TIME_SEC
 
     def process_data_messsage(self, message, ack, nack):
