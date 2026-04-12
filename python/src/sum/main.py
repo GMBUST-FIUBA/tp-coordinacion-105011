@@ -63,6 +63,9 @@ class SumFilter:
         current_retries = 0
         while current_retries < MAX_SHUTDOWN_RETRIES:
             try:
+                # Close input queue
+                self.input_queue.close()
+
                 # Close data outputs
                 for data_output in self.data_output_exchanges:
                     data_output.close()
