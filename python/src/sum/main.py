@@ -45,7 +45,7 @@ class SumFilter:
         ) + fruit_item.FruitItem(fruit, int(amount))
 
     def _process_eof(self):
-        logging.info(f"Broadcasting data messages")
+        logging.info(f"Distribuiting data messages")
         for final_fruit_item in self.amount_by_fruit.values():
             for data_output_exchange in self.data_output_exchanges:
                 data_output_exchange.send(

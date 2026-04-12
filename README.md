@@ -97,3 +97,5 @@ El trabajo se realizará en Python ya que el Trabajo Práctico de MOM fue realiz
 ## Sum
 
 Se identificó como problema al aumentar la cantidad de réplicas que, al enviar que se terminaron los registros de frutas, solo uno de los procesos *Sum* recibiría el mensaje mientras que los demás no se enterarían de ello. Por eso se creó un exchange de mensajes de control para avisar a las demás instancias de cosas a realizar, como saber que existió un *End of records*.
+
+Una vez que se determina el fin de la transmisión de los clientes, que viene dada por la lectura de un *End of records* seguido de una falta de llegada de mensajes con datos, se envían los datos a los *Aggregator*. La forma en la que se envía pasa de ser Broadcast a ser 
