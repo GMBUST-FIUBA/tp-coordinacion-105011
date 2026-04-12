@@ -1,6 +1,8 @@
 import os
+import signal
 import logging
 import threading
+import time
 
 from common import middleware, message_protocol, fruit_item
 
@@ -10,14 +12,21 @@ INPUT_QUEUE = os.environ["INPUT_QUEUE"]
 SUM_AMOUNT = int(os.environ["SUM_AMOUNT"])
 SUM_PREFIX = os.environ["SUM_PREFIX"]
 SUM_CONTROL_EXCHANGE = "SUM_CONTROL_EXCHANGE"
+SUM_CONTROL_EXCHANGE_KEY = "SUM_CONTROL"
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 
 class SumFilter:
     def __init__(self):
+        # Create fruit records queue
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, INPUT_QUEUE
         )
+
+        # Create sums control exchanges
+        self.control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
+
+        # Create output exchanges
         self.data_output_exchanges = []
         for i in range(AGGREGATION_AMOUNT):
             data_output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
@@ -25,6 +34,9 @@ class SumFilter:
             )
             self.data_output_exchanges.append(data_output_exchange)
         self.amount_by_fruit = {}
+
+        # Assign signal handlers
+        signal.signal(signalnum=signal.SIGTERM, handler=self._sigterm_handler)
 
     def _process_data(self, fruit, amount):
         logging.info(f"Process data")
@@ -46,6 +58,26 @@ class SumFilter:
         for data_output_exchange in self.data_output_exchanges:
             data_output_exchange.send(message_protocol.internal.serialize([]))
 
+    def _sigterm_handler(self, signum, frame):
+        MAX_SHUTDOWN_RETRIES = 3
+        current_retries = 0
+        while current_retries < MAX_SHUTDOWN_RETRIES:
+            try:
+                # Close data outputs
+                for data_output in self.data_output_exchanges:
+                    data_output.close()
+
+                # Close control exchange
+                self.control_exchange.close()
+            except:
+                retry_time = self.__get_shutdown_retry_backoff(current_retries)
+                time.sleep(retry_time)
+                current_retries += 1
+        pass
+
+    def __get_shutdown_retry_backoff(self, current_retries):
+        RETRY_SHUT_DOWN_TIME_SEC = 100
+        return RETRY_SHUT_DOWN_TIME_SEC
 
     def process_data_messsage(self, message, ack, nack):
         fields = message_protocol.internal.deserialize(message)
