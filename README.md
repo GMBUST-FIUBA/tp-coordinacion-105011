@@ -88,6 +88,8 @@ Nombre: Bustamante Gonzalo Manuel
 DNI: 43.086.565
 Padrón: 105.011
 
+---
+
 ## Introducción
 
 Se realiza la implementación del Trabajo Práctico de coordinación dado por la materia. Este repositorio es un *fork* del siguiente repositorio: <https://github.com/7574-sistemas-distribuidos/tp-coordinacion>.
@@ -98,4 +100,4 @@ El trabajo se realizará en Python ya que el Trabajo Práctico de MOM fue realiz
 
 Se identificó como problema al aumentar la cantidad de réplicas que, al enviar que se terminaron los registros de frutas, solo uno de los procesos *Sum* recibiría el mensaje mientras que los demás no se enterarían de ello. Por eso se creó un exchange de mensajes de control para avisar a las demás instancias de cosas a realizar, como saber que existió un *End of records*.
 
-Una vez que se determina el fin de la transmisión de los clientes, que viene dada por la lectura de un *End of records* seguido de una falta de llegada de mensajes con datos, se envían los datos a los *Aggregator*. La forma en la que se envía pasa de ser Broadcast a ser 
+Una vez que se determina el fin de la transmisión de los clientes, que viene dada por la lectura de un *End of records* seguido de una falta de llegada de mensajes con datos, se envían los datos a los *Aggregator*. En primer lugar se dividen los datos en bloques de igual tamaño y de forma aleatoria se escoge el *aggregator* a utilizar.

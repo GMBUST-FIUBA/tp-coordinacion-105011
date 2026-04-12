@@ -3,6 +3,7 @@ import signal
 import logging
 import threading
 import time
+import random
 
 from common import middleware, message_protocol, fruit_item
 
@@ -16,6 +17,11 @@ SUM_CONTROL_EXCHANGE_KEY = "SUM_CONTROL"
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 
+# Control messages
+class SumControl:
+    EOF_RECV = 1
+
+# Sum class
 class SumFilter:
     def __init__(self):
         # Create fruit records queue
@@ -25,6 +31,7 @@ class SumFilter:
 
         # Create sums control exchanges
         self.control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
+        self.last_ctrl_message = None
 
         # Create output exchanges
         self.data_output_exchanges = []
@@ -46,14 +53,35 @@ class SumFilter:
 
     def _process_eof(self):
         logging.info(f"Distribuiting data messages")
-        for final_fruit_item in self.amount_by_fruit.values():
-            for data_output_exchange in self.data_output_exchanges:
-                data_output_exchange.send(
-                    message_protocol.internal.serialize(
-                        [final_fruit_item.fruit, final_fruit_item.amount]
-                    )
-                )
+        # Get maximum length of chunk
+        chunk_max_length = len(self.amount_by_fruit.values()) // AGGREGATION_AMOUNT
 
+        # Set for initial sent data
+        available_exchanges = set(range(0, AGGREGATION_AMOUNT))
+        current_sent_data_total = 0
+        exchange_idx = random.randrange(available_exchanges)
+
+        # For every piece of data
+        for final_fruit_item in self.amount_by_fruit.values():
+            # Reset output exchange settings for next exchange
+            if current_sent_data_total == chunk_max_length:
+                available_exchanges.remove(exchange_idx)
+                exchange_idx = exchange_idx = random.randrange(available_exchanges)
+                current_sent_data_total = 0
+
+            # Send data
+            self.data_output_exchanges[exchange_idx].send(
+                message_protocol.internal.serialize(
+                    [final_fruit_item.fruit, final_fruit_item.amount]
+                )
+            )
+            current_sent_data_total += 1
+
+        # Signal EOF to other sums
+        self.control_exchange.send(SumControl.EOF_RECV)
+        self.last_ctrl_message = SumControl.EOF_RECV
+
+        # Send EOFs
         logging.info(f"Broadcasting EOF message")
         for data_output_exchange in self.data_output_exchanges:
             data_output_exchange.send(message_protocol.internal.serialize([]))
@@ -61,6 +89,8 @@ class SumFilter:
     def _sigterm_handler(self, signum, frame):
         MAX_SHUTDOWN_RETRIES = 3
         current_retries = 0
+
+        # Try up to MAX_SHUTDOWN_RETRIES
         while current_retries < MAX_SHUTDOWN_RETRIES:
             try:
                 # Close input queue
