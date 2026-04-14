@@ -25,16 +25,21 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 	# nack - Función que al invocarse realiza nack al mensaje que se está consumiendo. 
 	#Si se pierde la conexión con el middleware eleva MessageMiddlewareDisconnectedError.
 	#Si ocurre un error interno que no puede resolverse eleva MessageMiddlewareMessageError.
-    def start_consuming(self, on_message_callback):
+    def start_consuming(self, on_message_callback, inactivity_timeout=None):
 
         # Agregar callback
         self._callback_function = on_message_callback
-        self._queue.basic_consume(queue=self._queue_name, on_message_callback=self._internal_on_message_callback)
 
         # Consumir
         try:
             self._is_consuming = True
-            self._queue.start_consuming()
+            for method, properties, body in self._queue.consume(queue=self._queue_name, inactivity_timeout=inactivity_timeout):
+
+                self._internal_on_message_callback(self._queue, method, properties, body)
+
+                if not self._is_consuming:
+                    break
+
         except (pika.exceptions.ChannelClosed, pika.exceptions.AMQPConnectionError):
             self._is_consuming = False
             raise MessageMiddlewareDisconnectedError
@@ -57,7 +62,7 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
     def stop_consuming(self):
         if self._is_consuming:
             try:
-                self._queue.stop_consuming()
+                self._queue.cancel()
                 self._is_consuming = False
             except (pika.exceptions.ChannelClosed, pika.exceptions.AMQPConnectionError):
                 raise MessageMiddlewareDisconnectedError
@@ -106,7 +111,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
 	# nack - Función que al invocarse realiza nack al mensaje que se está consumiendo. 
 	#Si se pierde la conexión con el middleware eleva MessageMiddlewareDisconnectedError.
 	#Si ocurre un error interno que no puede resolverse eleva MessageMiddlewareMessageError.
-    def start_consuming(self, on_message_callback):
+    def start_consuming(self, on_message_callback, inactivity_timeout=None):
         # Guardar función de callback
         self._callback_function = on_message_callback
 
@@ -118,12 +123,16 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
         for routing_key in self._routing_keys:
             self._channel.queue_bind(exchange=self._exchange_name, queue=new_channel_name, routing_key=routing_key)
 
-        # Asociar callback
-        self._channel.basic_consume(queue=new_channel_name, on_message_callback=self._internal_on_message_callback)
         # Consumir
         try:
             self._is_consuming = True
-            self._channel.start_consuming()
+            for method, properties, body in self._channel.consume(queue=new_channel_name, inactivity_timeout=inactivity_timeout):
+
+                self._internal_on_message_callback(self._channel, method, properties, body)
+
+                if not self._is_consuming:
+                    break
+
         except (pika.exceptions.ChannelClosed, pika.exceptions.AMQPConnectionError):
             self._is_consuming = False
             raise MessageMiddlewareDisconnectedError
@@ -147,7 +156,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
     def stop_consuming(self):
         if self._is_consuming:
             try:
-                self._channel.stop_consuming()
+                self._channel.cancel()
                 self._is_consuming = False
             except (pika.exceptions.ChannelClosed, pika.exceptions.AMQPConnectionError):
                 raise MessageMiddlewareDisconnectedError
