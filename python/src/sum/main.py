@@ -143,16 +143,16 @@ class SumFilter:
                     self._send_data_to_aggregation(*fields)
                 else:
                     self.shutdown()
-
-        # If a message is received, process it.
-        fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 2:
-            self._process_data(*fields)
-        elif len(fields) == 0:
-            self._process_eof(*fields)
         else:
-            nack()
-        ack()
+            # If a message is received, process it.
+            fields = message_protocol.internal.deserialize(message)
+            if len(fields) == 2:
+                self._process_data(*fields)
+            elif len(fields) == 0:
+                self._process_eof(*fields)
+            else:
+                nack()
+            ack()
 
     def shutdown(self):
         MAX_SHUTDOWN_RETRIES = 3
