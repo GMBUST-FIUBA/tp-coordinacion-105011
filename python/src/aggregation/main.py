@@ -26,7 +26,7 @@ class AggregationFilter:
         self.fruit_top = []
 
     def _process_data(self, fruit, amount):
-        logging.info("Processing data message")
+        logging.info(f"Processing data message: {fruit}, {amount}")
         for i in range(len(self.fruit_top)):
             if self.fruit_top[i].fruit == fruit:
                 self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(

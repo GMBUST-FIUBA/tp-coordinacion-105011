@@ -41,6 +41,9 @@ class SumFilter:
         self.eof_ctrl_generated_by_process_lock = threading.Lock()
         self.eof_ctrl_generated_by_process = False
 
+        # Control to say if data was stored and sent
+        self.data_was_sent = False
+
         # Create output exchanges
         self.data_output_exchanges = []
         for i in range(AGGREGATION_AMOUNT):
@@ -59,10 +62,12 @@ class SumFilter:
 
     def _read_control_message(self):
         logging.info(f"Input ctrl: start")
+        INACTIVITY_TIMEOUT = 1.0
         self.keep_reading_ctrl = True
+
         while self.keep_reading_ctrl:
             logging.info(f"Input ctrl: start consuming")
-            self.control_exchange_receiver.start_consuming(on_message_callback=self.__control_message_callback, inactivity_timeout=1.0)
+            self.control_exchange_receiver.start_consuming(on_message_callback=self.__control_message_callback, inactivity_timeout=INACTIVITY_TIMEOUT)
 
     def __control_message_callback(self, message, ack, nack):
         try:
@@ -76,6 +81,8 @@ class SumFilter:
                         if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
                             self.last_ctrl_message = ctrl_code
                 ack()
+            elif not self.keep_reading_ctrl:
+                self.control_exchange_receiver.stop_consuming()
         except:
             with self.last_ctrl_message_lock:
                 self.last_ctrl_message = None
@@ -85,7 +92,7 @@ class SumFilter:
 
 
     def _process_data(self, fruit, amount):
-        logging.info(f"Process data")
+        #logging.info(f"Process data")
         self.amount_by_fruit[fruit] = self.amount_by_fruit.get(
             fruit, fruit_item.FruitItem(fruit, 0)
         ) + fruit_item.FruitItem(fruit, int(amount))
@@ -147,12 +154,14 @@ class SumFilter:
             with self.last_ctrl_message_lock:
                 # If a timeout occurred, then clients stopped sending data.
                 # Otherwise, shutdown.
-                if self.last_ctrl_message is SumControl.EOF_RECV:
-                    logging.info(f"Process msg: send data to agg")
-                    self._send_data_to_aggregation()
-                else:
-                    logging.info(f"Process msg: shutdown because los connection")
-                    self.shutdown()
+                if not self.data_was_sent:
+                    if self.last_ctrl_message is SumControl.EOF_RECV:
+                        logging.info(f"Process msg: send data to agg")
+                        self._send_data_to_aggregation()
+                        self.data_was_sent = True
+                    else:
+                        logging.info(f"Process msg: shutdown because of lost connection")
+                        self.shutdown()
         else:
             # If a message is received, process it.
             fields = message_protocol.internal.deserialize(message)
