@@ -21,35 +21,6 @@ AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 class SumControl:
     EOF_RECV = 1
 
-# Control messages reception
-class SumControlReceptor:
-
-    def __init__(self, control_exchange: middleware.MessageMiddlewareExchangeRabbitMQ):
-        self.control_exchange = control_exchange
-
-    def sum_control_msg_callback(self, message, ack, nack):
-        try:
-            ctrl_code = int(message)
-
-            with self.last_ctrl_message_lock:
-                with self.eof_ctrl_generated_by_process_lock:
-
-                    # Check if process created EOF message
-                    if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
-                        self.last_ctrl_message = ctrl_code
-            ack()
-        except:
-            with self.last_ctrl_message_lock:
-                self.last_ctrl_message = None
-            nack()
-
-    def shutdown(self):
-        self.control_exchange.stop_consuming()
-        self.control_exchange.close()
-
-    def _sigterm_handler(self, signum, frame):
-        self.shutdown()
-
 # Sum class
 class SumFilter:
     def __init__(self):
@@ -84,11 +55,34 @@ class SumFilter:
 
         # Start and store control messages thread
         self.control_msg_input_thread = threading.Thread(target=self._read_control_message)
+        self.control_msg_input_thread.start()
 
     def _read_control_message(self):
-        control_exchange_receiver = SumControlReceptor(self.control_exchange_receiver)
+        logging.info(f"Input ctrl: start")
+        self.keep_reading_ctrl = True
+        while self.keep_reading_ctrl:
+            logging.info(f"Input ctrl: start consuming")
+            self.control_exchange_receiver.start_consuming(on_message_callback=self.__control_message_callback, inactivity_timeout=1.0)
 
-        self.control_exchange_sender.start_consuming(on_message_callback=control_exchange_receiver.sum_control_msg_callback)
+    def __control_message_callback(self, message, ack, nack):
+        try:
+            if message is not None:
+                ctrl_code = int(message)
+
+                with self.last_ctrl_message_lock:
+                    with self.eof_ctrl_generated_by_process_lock:
+
+                        # Check if process created EOF message
+                        if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
+                            self.last_ctrl_message = ctrl_code
+                ack()
+        except:
+            with self.last_ctrl_message_lock:
+                self.last_ctrl_message = None
+            nack()
+
+        logging.info(f"Input ctrl: callback executed")
+
 
     def _process_data(self, fruit, amount):
         logging.info(f"Process data")
@@ -105,14 +99,14 @@ class SumFilter:
         # Set for initial sent data
         available_exchanges = set(range(0, AGGREGATION_AMOUNT))
         current_sent_data_total = 0
-        exchange_idx = random.randrange(available_exchanges)
+        exchange_idx = random.choice(tuple(available_exchanges))
 
         # For every piece of data
         for final_fruit_item in self.amount_by_fruit.values():
             # Reset output exchange settings for next exchange
             if current_sent_data_total == chunk_max_length:
                 available_exchanges.remove(exchange_idx)
-                exchange_idx = exchange_idx = random.randrange(available_exchanges)
+                exchange_idx = random.choice(tuple(available_exchanges))
                 current_sent_data_total = 0
 
             # Send data
@@ -131,10 +125,12 @@ class SumFilter:
     # Process EOF
     # Sends EOF to the rest of the sums
     def _process_eof(self):
-
+        logging.info(f"Process msg: EOF received")
         with self.eof_ctrl_generated_by_process_lock:
             self.control_exchange_sender.send(str(SumControl.EOF_RECV))
-            self.eof_ctrl_generated_by_process_lock = True
+            self.eof_ctrl_generated_by_process = True
+            self.last_ctrl_message = SumControl.EOF_RECV
+        logging.info(f"Process msg: EOF stored")
 
     # Sigterm handler
     def _sigterm_handler(self, signum, frame):
@@ -152,8 +148,10 @@ class SumFilter:
                 # If a timeout occurred, then clients stopped sending data.
                 # Otherwise, shutdown.
                 if self.last_ctrl_message is SumControl.EOF_RECV:
-                    self._send_data_to_aggregation(*fields)
+                    logging.info(f"Process msg: send data to agg")
+                    self._send_data_to_aggregation()
                 else:
+                    logging.info(f"Process msg: shutdown because los connection")
                     self.shutdown()
         else:
             # If a message is received, process it.
@@ -176,22 +174,29 @@ class SumFilter:
                 # Close input queue
                 self.input_queue.close()
 
+                logging.info(f"Input queue shutdown")
+
                 # Close control messages input
+                self.keep_reading_ctrl = False
                 self.control_msg_input_thread.join()
+
+                logging.info(f"Control msg input thread shutdown")
 
                 # Close data outputs
                 for data_output in self.data_output_exchanges:
                     data_output.close()
+
+                logging.info(f"Successful shutdown")
 
             except:
                 retry_time = self.__get_shutdown_retry_backoff(current_retries)
                 time.sleep(retry_time)
                 current_retries += 1
 
-    CLIENTS_STOPPED_SENDING_DATA_SECS = 5
+    CLIENTS_STOPPED_SENDING_DATA_SECS = 5.0
 
     def start(self):
-        self.input_queue.start_consuming(self.process_data_messsage, inactivity_timeout=self.CLIENTS_STOPPED_SENDING_DATA_SECS)
+        self.input_queue.start_consuming(self.process_data_messsage, inactivity_timeout=SumFilter.CLIENTS_STOPPED_SENDING_DATA_SECS)
 
 def main():
     logging.basicConfig(level=logging.INFO)
