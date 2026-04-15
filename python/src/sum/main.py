@@ -21,6 +21,35 @@ AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 class SumControl:
     EOF_RECV = 1
 
+# Control messages reception
+class SumControlReceptor:
+
+    def __init__(self, control_exchange: middleware.MessageMiddlewareExchangeRabbitMQ):
+        self.control_exchange = control_exchange
+
+    def sum_control_msg_callback(self, message, ack, nack):
+        try:
+            ctrl_code = int(message)
+
+            with self.last_ctrl_message_lock:
+                with self.eof_ctrl_generated_by_process_lock:
+
+                    # Check if process created EOF message
+                    if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
+                        self.last_ctrl_message = ctrl_code
+            ack()
+        except:
+            with self.last_ctrl_message_lock:
+                self.last_ctrl_message = None
+            nack()
+
+    def shutdown(self):
+        self.control_exchange.stop_consuming()
+        self.control_exchange.close()
+
+    def _sigterm_handler(self, signum, frame):
+        self.shutdown()
+
 # Sum class
 class SumFilter:
     def __init__(self):
@@ -30,7 +59,8 @@ class SumFilter:
         )
 
         # Create sums control exchanges
-        self.control_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
+        self.control_exchange_sender = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
+        self.control_exchange_receiver = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
 
         # Lock to control the last control message
         self.last_ctrl_message_lock = threading.Lock()
@@ -56,23 +86,9 @@ class SumFilter:
         self.control_msg_input_thread = threading.Thread(target=self._read_control_message)
 
     def _read_control_message(self):
-        def __control_message_callback(message, ack, nack):
-            try:
-                ctrl_code = int(message)
+        control_exchange_receiver = SumControlReceptor(self.control_exchange_receiver)
 
-                with self.last_ctrl_message_lock:
-                    with self.eof_ctrl_generated_by_process_lock:
-
-                        # Check if process created EOF message
-                        if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
-                            self.last_ctrl_message = ctrl_code
-                ack()
-            except:
-                with self.last_ctrl_message_lock:
-                    self.last_ctrl_message = None
-                nack()
-
-        self.control_exchange.start_consuming(on_message_callback=__control_message_callback)
+        self.control_exchange_sender.start_consuming(on_message_callback=control_exchange_receiver.sum_control_msg_callback)
 
     def _process_data(self, fruit, amount):
         logging.info(f"Process data")
@@ -107,12 +123,8 @@ class SumFilter:
             )
             current_sent_data_total += 1
 
-        # Signal EOF to other sums
-        self.control_exchange.send(SumControl.EOF_RECV)
-        self.last_ctrl_message = SumControl.EOF_RECV
-
         # Send EOFs
-        logging.info(f"Broadcasting EOF message")
+        logging.info(f"Broadcasting EOF message to aggregators")
         for data_output_exchange in self.data_output_exchanges:
             data_output_exchange.send(message_protocol.internal.serialize([]))
 
@@ -121,7 +133,7 @@ class SumFilter:
     def _process_eof(self):
 
         with self.eof_ctrl_generated_by_process_lock:
-            self.control_exchange.send(str(SumControl.EOF_RECV))
+            self.control_exchange_sender.send(str(SumControl.EOF_RECV))
             self.eof_ctrl_generated_by_process_lock = True
 
     # Sigterm handler
@@ -171,8 +183,6 @@ class SumFilter:
                 for data_output in self.data_output_exchanges:
                     data_output.close()
 
-                # Close control exchange
-                self.control_exchange.close()
             except:
                 retry_time = self.__get_shutdown_retry_backoff(current_retries)
                 time.sleep(retry_time)
