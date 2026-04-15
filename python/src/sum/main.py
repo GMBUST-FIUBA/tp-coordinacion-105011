@@ -99,7 +99,7 @@ class SumFilter:
 
 
     def _process_data(self, fruit, amount):
-        #logging.info(f"Process data")
+        logging.info(f"Process data: {fruit}, {amount}")
         self.amount_by_fruit[fruit] = self.amount_by_fruit.get(
             fruit, fruit_item.FruitItem(fruit, 0)
         ) + fruit_item.FruitItem(fruit, int(amount))
@@ -130,6 +130,10 @@ class SumFilter:
                 )
             )
             current_sent_data_total += 1
+
+        # Send estimated clients
+        for data_output_exchange in self.data_output_exchanges:
+            data_output_exchange.send(message_protocol.internal.serialize(["total_clients", str(self.estimated_clients)]))
 
         # Send EOFs
         logging.info(f"Broadcasting EOF message to aggregators")
