@@ -44,6 +44,10 @@ class SumFilter:
         # Control to say if data was stored and sent
         self.data_was_sent = False
 
+        # Lock to control de value of estimated clients
+        self.estimated_clients_lock = threading.Lock()
+        self.estimated_clients = 0
+
         # Create output exchanges
         self.data_output_exchanges = []
         for i in range(AGGREGATION_AMOUNT):
@@ -80,6 +84,9 @@ class SumFilter:
                         # Check if process created EOF message
                         if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
                             self.last_ctrl_message = ctrl_code
+
+                            with self.estimated_clients_lock:
+                                self.estimated_clients += 1
                 ack()
             elif not self.keep_reading_ctrl:
                 self.control_exchange_receiver.stop_consuming()
@@ -137,6 +144,9 @@ class SumFilter:
             self.control_exchange_sender.send(str(SumControl.EOF_RECV))
             self.eof_ctrl_generated_by_process = True
             self.last_ctrl_message = SumControl.EOF_RECV
+
+            with self.estimated_clients_lock:
+                self.estimated_clients += 1
         logging.info(f"Process msg: EOF stored")
 
     # Sigterm handler
