@@ -44,10 +44,6 @@ class SumFilter:
         # Control to say if data was stored and sent
         self.data_was_sent = False
 
-        # Lock to control de value of estimated clients
-        self.estimated_clients_lock = threading.Lock()
-        self.estimated_clients = 0
-
         # Create output exchanges
         self.data_output_exchanges = []
         for i in range(AGGREGATION_AMOUNT):
@@ -55,7 +51,7 @@ class SumFilter:
                 MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{i}"]
             )
             self.data_output_exchanges.append(data_output_exchange)
-        self.amount_by_fruit = {}
+        self.fruits_by_id = {}
 
         # Assign signal handlers
         signal.signal(signalnum=signal.SIGTERM, handler=self._sigterm_handler)
@@ -76,17 +72,6 @@ class SumFilter:
     def __control_message_callback(self, message, ack, nack):
         try:
             if message is not None:
-                ctrl_code = int(message)
-
-                with self.last_ctrl_message_lock:
-                    with self.eof_ctrl_generated_by_process_lock:
-
-                        # Check if process created EOF message
-                        if not self.eof_ctrl_generated_by_process and ctrl_code == SumControl.EOF_RECV:
-                            self.last_ctrl_message = ctrl_code
-
-                            with self.estimated_clients_lock:
-                                self.estimated_clients += 1
                 ack()
             elif not self.keep_reading_ctrl:
                 self.control_exchange_receiver.stop_consuming()
@@ -98,59 +83,49 @@ class SumFilter:
         logging.info(f"Input ctrl: callback executed")
 
 
-    def _process_data(self, fruit, amount):
-        logging.info(f"Process data: {fruit}, {amount}")
-        self.amount_by_fruit[fruit] = self.amount_by_fruit.get(
+    def _process_data(self, sender_id, fruit, amount):
+        logging.info(f"Process data: {sender_id}, {fruit}, {amount}")
+        
+        # Store new sender ID if not present
+        if sender_id not in self.fruits_by_id:
+            self.fruits_by_id[sender_id] = {}
+
+        # Store new ammount
+        amount_by_fruit = self.fruits_by_id[sender_id]
+        amount_by_fruit[fruit] = amount_by_fruit.get(
             fruit, fruit_item.FruitItem(fruit, 0)
         ) + fruit_item.FruitItem(fruit, int(amount))
 
     # Send data to aggregation stage
     def _send_data_to_aggregation(self):
         logging.info(f"Distribuiting data messages")
-        # Get maximum length of chunk
-        chunk_max_length = len(self.amount_by_fruit.values()) // AGGREGATION_AMOUNT
-
-        # Set for initial sent data
-        available_exchanges = set(range(0, AGGREGATION_AMOUNT))
-        current_sent_data_total = 0
-        exchange_idx = random.choice(tuple(available_exchanges))
 
         # For every piece of data
-        for final_fruit_item in self.amount_by_fruit.values():
-            # Reset output exchange settings for next exchange
-            if current_sent_data_total == chunk_max_length:
-                available_exchanges.remove(exchange_idx)
-                exchange_idx = random.choice(tuple(available_exchanges))
-                current_sent_data_total = 0
+        for (sender_id, amount_by_fruit) in self.fruits_by_id:
+            # Get hash of aggregator to send
+            dest_agg = sender_id % AGGREGATION_AMOUNT
 
             # Send data
-            self.data_output_exchanges[exchange_idx].send(
-                message_protocol.internal.serialize(
-                    [final_fruit_item.fruit, final_fruit_item.amount]
+            for final_fruit_item in amount_by_fruit:
+                self.data_output_exchanges[dest_agg].send(
+                    message_protocol.internal.serialize(
+                        [final_fruit_item.fruit, final_fruit_item.amount]
+                    )
                 )
-            )
-            current_sent_data_total += 1
 
-        # Send estimated clients
-        for data_output_exchange in self.data_output_exchanges:
-            data_output_exchange.send(message_protocol.internal.serialize(["total_clients", str(self.estimated_clients)]))
-
-        # Send EOFs
-        logging.info(f"Broadcasting EOF message to aggregators")
-        for data_output_exchange in self.data_output_exchanges:
-            data_output_exchange.send(message_protocol.internal.serialize([]))
+            # Send EOF
+            logging.info(f"Sending EOF message to aggregator {dest_agg}")
+            self.data_output_exchanges[dest_agg].send(message_protocol.internal.serialize([sender_id]))
 
     # Process EOF
     # Sends EOF to the rest of the sums
-    def _process_eof(self):
+    def _process_eof(self, sender_id):
         logging.info(f"Process msg: EOF received")
         with self.eof_ctrl_generated_by_process_lock:
-            self.control_exchange_sender.send(str(SumControl.EOF_RECV))
+            self.control_exchange_sender.send(sender_id)
             self.eof_ctrl_generated_by_process = True
             self.last_ctrl_message = SumControl.EOF_RECV
 
-            with self.estimated_clients_lock:
-                self.estimated_clients += 1
         logging.info(f"Process msg: EOF stored")
 
     # Sigterm handler
@@ -179,9 +154,9 @@ class SumFilter:
         else:
             # If a message is received, process it.
             fields = message_protocol.internal.deserialize(message)
-            if len(fields) == 2:
+            if len(fields) == 3:
                 self._process_data(*fields)
-            elif len(fields) == 0:
+            elif len(fields) == 1:
                 self._process_eof(*fields)
             else:
                 nack()

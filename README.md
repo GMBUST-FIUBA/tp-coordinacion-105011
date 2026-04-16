@@ -96,11 +96,17 @@ Se realiza la implementación del Trabajo Práctico de coordinación dado por la
 
 El trabajo se realizará en Python ya que el Trabajo Práctico de MOM fue realizado en dicho lenguaje y se busca reutilizar dicho código.
 
+## Message handler de cliente
+
+Para poder identificar el cliente que envió los mensajes se le definió a cada clase de *MessageHandler* un identificador único. Este identificador se decidió que sería el UUID versión 4 por generar un identificador prácticamente único y porque es fácilmente escalable. Si bien se debe incurrir a un costo de transmisión considerable enviando una gran cantidad de bits esto puede ser en parte solventado utilizando métodos de procesamiento de a grandes cantidades (*batchs*), aunque eso queda por fuera del alcance de este proyecto. Este identificador, que se llamará *identificador del cliente*, se enviará en cada mensaje del message handler del cliente a los *Sum*.
+
+
 ## Sum
 
-Se identificó como problema al aumentar la cantidad de réplicas que, al enviar que se terminaron los registros de frutas, solo uno de los procesos *Sum* recibiría el mensaje mientras que los demás no se enterarían de ello. Por eso se creó un exchange de mensajes de control para avisar a las demás instancias de cosas a realizar, como saber que existió un *End of records*.
+Se identificó como problema al aumentar la cantidad de réplicas que, al enviar que se terminaron los registros de frutas, solo uno de los procesos *Sum* recibiría el mensaje mientras que los demás no se enterarían de ello. Por eso se creó un exchange de mensajes de control para avisar a las demás instancias de cosas a realizar, como saber que existió un *End of records*. Cada registro de frutas y cantidades es almacenado por identificador y sumado utilizando la interfaz provista.
 
-Una vez que se determina el fin de la transmisión de los clientes, que viene dada por la lectura de un *End of records* seguido de una falta de llegada de mensajes con datos, se envían los datos a los *Aggregator*. En primer lugar se dividen los datos en bloques de igual tamaño y de forma aleatoria se escoge el *aggregator* a utilizar.
+Una vez que se determina el fin de la transmisión de los clientes, que viene dada por la lectura de un *End of records* seguido de una falta de llegada de mensajes con datos, se envían los datos a los *Aggregator*. El *Aggregator* a utilizar se decide al aplicarle la operación *mod* al identificador UUID del cliente que viene en los mensajes, aprovechando que todos los *Sum* generan la lista de *Aggregator* de la misma forma. Por ejemplo, si el identificador es 10 y hay 3 *Aggregator* se calcula `10 mod 3` que es igual a `1` con lo que el *Aggregator* con ese valor es el utilizado. De esta forma todos los *Sum* enviarán los datos del mismo cliente al mismo *Aggregator*.
+
 
 ## Aggregator
 
