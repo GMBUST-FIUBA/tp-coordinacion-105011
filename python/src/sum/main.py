@@ -5,6 +5,7 @@ import threading
 import time
 import random
 import uuid
+import collections
 
 from common import middleware, message_protocol, fruit_item
 
@@ -45,6 +46,9 @@ class SumFilter:
         # Control to say if data was stored and sent
         self.data_was_sent = False
 
+        # Store order of EOF received
+        self.agg_sending_order = collections.deque()
+
         # Create output exchanges
         self.data_output_exchanges = []
         for i in range(AGGREGATION_AMOUNT):
@@ -73,9 +77,21 @@ class SumFilter:
     def __control_message_callback(self, message, ack, nack):
         try:
             if message is not None:
+                # Get message type and arguments
+                split_msg = message_protocol.internal.deserialize(message)
+
+                with self.last_ctrl_message_lock:
+                    # Check control command
+                    msg_type = int(split_msg[0])
+
+                    # If type is EOF store ID for ordering
+                    if msg_type == SumControl.EOF_RECV:
+                        self.agg_sending_order.append(split_msg[1])
+                        self.last_ctrl_message = SumControl.EOF_RECV
                 ack()
             elif not self.keep_reading_ctrl:
                 self.control_exchange_receiver.stop_consuming()
+                logging.info(f"Input ctrl: shutdown")
         except:
             with self.last_ctrl_message_lock:
                 self.last_ctrl_message = None
@@ -101,8 +117,8 @@ class SumFilter:
     def _send_data_to_aggregation(self):
         logging.info(f"Distribuiting data messages")
 
-        # For every piece of data
-        for sender_id in self.fruits_by_id:
+        # For every sender in order
+        for sender_id in self.agg_sending_order:
             # Get hash of aggregator to send
             sender_id_uuid = uuid.UUID(sender_id)
             dest_agg = sender_id_uuid.int % AGGREGATION_AMOUNT
@@ -111,7 +127,7 @@ class SumFilter:
             for final_fruit_item in self.fruits_by_id[sender_id].values():
                 self.data_output_exchanges[dest_agg].send(
                     message_protocol.internal.serialize(
-                        [final_fruit_item.fruit, final_fruit_item.amount]
+                        [sender_id, final_fruit_item.fruit, final_fruit_item.amount]
                     )
                 )
 
@@ -123,12 +139,9 @@ class SumFilter:
     # Sends EOF to the rest of the sums
     def _process_eof(self, sender_id):
         logging.info(f"Process msg: EOF received")
-        with self.eof_ctrl_generated_by_process_lock:
-            self.control_exchange_sender.send(sender_id)
-            self.eof_ctrl_generated_by_process = True
-            self.last_ctrl_message = SumControl.EOF_RECV
 
-        logging.info(f"Process msg: EOF stored")
+        # Propagate EOF to other sums
+        self.control_exchange_sender.send(message_protocol.internal.serialize([SumControl.EOF_RECV, sender_id]))
 
     # Sigterm handler
     def _sigterm_handler(self, signum, frame):
