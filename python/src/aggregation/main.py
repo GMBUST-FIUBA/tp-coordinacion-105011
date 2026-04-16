@@ -24,23 +24,23 @@ class AggregationFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
         self.fruit_top = []
-        self.received_eof = 0
+        self.sender_id = None
 
-    def _process_data(self, header, amount):
-        if header == "total_clients":
-            self.total_clients = amount
-        else:
-            fruit = header
-            logging.info(f"Processing data message: {fruit}, {amount}")
-            for i in range(len(self.fruit_top)):
-                if self.fruit_top[i].fruit == fruit:
-                    self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(
-                        fruit, amount
-                    )
-                    return
-            bisect.insort(self.fruit_top, fruit_item.FruitItem(fruit, amount))
+    def _reset_storage(self):
+        self.fruit_top = []
+        self.sender_id = None
 
-    def _process_eof(self):
+    def _process_data(self, fruit, amount):
+        logging.info(f"Processing data message: {fruit}, {amount}")
+        for i in range(len(self.fruit_top)):
+            if self.fruit_top[i].fruit == fruit:
+                self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(
+                    fruit, amount
+                )
+                return
+        bisect.insort(self.fruit_top, fruit_item.FruitItem(fruit, amount))
+
+    def _process_eof(self, sender_id):
         logging.info("Received EOF")
         fruit_chunk = list(self.fruit_top[-TOP_SIZE:])
         fruit_chunk.reverse()
@@ -50,18 +50,23 @@ class AggregationFilter:
                 fruit_chunk,
             )
         )
-        fruit_top.append(("total_clients", str(self.total_clients)))
+        fruit_top.append(("sender_id", sender_id))
         self.output_queue.send(message_protocol.internal.serialize(fruit_top))
-        del self.fruit_top
+
+        # Restore storage to accept new client data
+        self._reset_storage()
 
     def process_messsage(self, message, ack, nack):
         logging.info("Process message")
         fields = message_protocol.internal.deserialize(message)
         if len(fields) == 2:
             self._process_data(*fields)
+            ack()
+        elif len(fields) == 1:
+            self._process_eof(*fields)
+            ack()
         else:
-            self._process_eof()
-        ack()
+            nack()
 
     def start(self):
         self.input_exchange.start_consuming(self.process_messsage)

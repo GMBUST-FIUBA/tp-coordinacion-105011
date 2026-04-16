@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import random
+import uuid
 
 from common import middleware, message_protocol, fruit_item
 
@@ -101,12 +102,13 @@ class SumFilter:
         logging.info(f"Distribuiting data messages")
 
         # For every piece of data
-        for (sender_id, amount_by_fruit) in self.fruits_by_id:
+        for sender_id in self.fruits_by_id:
             # Get hash of aggregator to send
-            dest_agg = sender_id % AGGREGATION_AMOUNT
+            sender_id_uuid = uuid.UUID(sender_id)
+            dest_agg = sender_id_uuid.int % AGGREGATION_AMOUNT
 
             # Send data
-            for final_fruit_item in amount_by_fruit:
+            for final_fruit_item in self.fruits_by_id[sender_id].values():
                 self.data_output_exchanges[dest_agg].send(
                     message_protocol.internal.serialize(
                         [final_fruit_item.fruit, final_fruit_item.amount]
@@ -156,11 +158,12 @@ class SumFilter:
             fields = message_protocol.internal.deserialize(message)
             if len(fields) == 3:
                 self._process_data(*fields)
+                ack()
             elif len(fields) == 1:
                 self._process_eof(*fields)
+                ack()
             else:
                 nack()
-            ack()
 
     def shutdown(self):
         MAX_SHUTDOWN_RETRIES = 3

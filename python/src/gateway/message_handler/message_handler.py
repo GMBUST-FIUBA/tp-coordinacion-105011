@@ -2,10 +2,12 @@ from common import message_protocol
 
 import uuid
 
+UUID_POSITION = 0
+
 class MessageHandler:
 
     def __init__(self):
-        self.messages_id = uuid.uuid4()
+        self.messages_id = str(uuid.uuid4())
     
     def serialize_data_message(self, message):
         [fruit, amount] = message
@@ -16,4 +18,7 @@ class MessageHandler:
 
     def deserialize_result_message(self, message):
         fields = message_protocol.internal.deserialize(message)
-        return fields
+        if fields[UUID_POSITION] == self.messages_id:
+            return fields[UUID_POSITION + 1:]
+        else:
+            return None
