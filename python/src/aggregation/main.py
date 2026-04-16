@@ -27,6 +27,7 @@ class AggregationFilter:
         )
 
         # Set initial stored data
+        self.fruit_stored = {}
         self.fruit_top = []
         self.sender_id = None
         self.eof_received = False
@@ -36,35 +37,32 @@ class AggregationFilter:
 
     # Reset all storaged data from client
     def _reset_storage(self):
-        self.fruit_top = []
+        self.fruit_stored = {}
         self.sender_id = None
         self.eof_received = False
 
     # Correctly add first fruit record
     def __add_first_fruit_record(self, sender_id, fruit, amount):
         self.sender_id = sender_id
-        self.fruit_top.append(fruit_item.FruitItem(fruit, amount))
+        self.fruit_stored[fruit] = self.fruit_stored.get(fruit, fruit_item.FruitItem(fruit, 0)) + fruit_item.FruitItem(fruit, amount)
 
-    # Correctly new first fruit record
-    def __add_fruits_to_ordered_list(self, fruit, amount):
-        for i in range(len(self.fruit_top)):
-            if self.fruit_top[i].fruit == fruit:
-                self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(
-                    fruit, amount
-                )
-                return
-        bisect.insort(self.fruit_top, fruit_item.FruitItem(fruit, amount))
+    # Correctly store new first fruit record
+    def __add_fruit_record(self, fruit, amount):
+        self.fruit_stored[fruit] = self.fruit_stored.get(fruit, fruit_item.FruitItem(fruit, 0)) + fruit_item.FruitItem(fruit, amount)
+        self.eof_received = False
 
+    # Process message gotten from sum
     def _process_data(self, sender_id, fruit, amount):
         logging.info(f"Processing data message: {sender_id}, {fruit}, {amount}")
 
         if self.sender_id is None:
             # Fruit top is empty because of recent storage reset
+            logging.info(f"Nuevo cliente: {sender_id}")
             self.__add_first_fruit_record(sender_id, fruit, amount)
 
         elif self.sender_id == sender_id:
             # Fruit record has to be added correctly
-            self.__add_fruits_to_ordered_list(fruit, amount)
+            self.__add_fruit_record(fruit, amount)
 
         else:
             # If an EOF was detected then send top to joiner and add record to empty storage
@@ -79,12 +77,12 @@ class AggregationFilter:
 
     def _send_fruits_top(self):
         logging.info("Top finished. Sending to joiner...")
-        fruit_chunk = list(self.fruit_top[-TOP_SIZE:])
-        fruit_chunk.reverse()
+        fruit_chunk = list(self.fruit_stored.values())
+        fruit_chunk.sort(reverse=True)
         fruit_top = list(
             map(
                 lambda fruit_item: (fruit_item.fruit, fruit_item.amount),
-                fruit_chunk,
+                fruit_chunk[0:TOP_SIZE],
             )
         )
         fruit_top.append(("sender_id", self.sender_id))
@@ -95,8 +93,8 @@ class AggregationFilter:
 
     def _process_eof(self, sender_id):
         logging.info(f"Processing EOF")
-        self.sender_id = sender_id
-        self.eof_received = True
+        if self.sender_id == sender_id:
+            self.eof_received = True
 
     # Sigterm handler
     def _sigterm_handler(self):
@@ -104,7 +102,7 @@ class AggregationFilter:
 
     # Retry backoff when it shutdowns
     def __get_shutdown_retry_backoff(self, current_retries):
-        RETRY_SHUT_DOWN_TIME_SEC = 0.5
+        RETRY_SHUT_DOWN_TIME_SEC = 0.2
         return RETRY_SHUT_DOWN_TIME_SEC
 
     # Shutdown method
@@ -146,7 +144,7 @@ class AggregationFilter:
                 nack()
 
     def start(self):
-        INACTIVITY_TIMEOUT_SECS = 0.1
+        INACTIVITY_TIMEOUT_SECS = 1
         self.input_exchange.start_consuming(self.process_messsage, inactivity_timeout=INACTIVITY_TIMEOUT_SECS)
 
 

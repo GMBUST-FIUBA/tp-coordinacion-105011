@@ -119,7 +119,7 @@ class SumFilter:
 
         # For every sender in order
         for sender_id in self.agg_sending_order:
-            # Get hash of aggregator to send
+            # Get aggregator to send records
             sender_id_uuid = uuid.UUID(sender_id)
             dest_agg = sender_id_uuid.int % AGGREGATION_AMOUNT
 
@@ -134,6 +134,8 @@ class SumFilter:
             # Send EOF
             logging.info(f"Sending EOF message to aggregator {dest_agg}")
             self.data_output_exchanges[dest_agg].send(message_protocol.internal.serialize([sender_id]))
+
+            time.sleep(1)
 
     # Process EOF
     # Sends EOF to the rest of the sums
