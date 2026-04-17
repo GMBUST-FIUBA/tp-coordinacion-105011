@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 
 from common import middleware, message_protocol, fruit_item
 
@@ -22,6 +23,44 @@ class JoinFilter:
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
+
+    # Sigterm handler
+    def _sigterm_handler(self, signum, frame):
+        self.shutdown()
+
+    def __get_shutdown_retry_backoff(self, current_retries):
+        RETRY_SHUT_DOWN_TIME_SEC = 0.1
+        return RETRY_SHUT_DOWN_TIME_SEC
+
+    def shutdown(self):
+        MAX_SHUTDOWN_RETRIES = 3
+        current_retries = 0
+
+        # Try up to MAX_SHUTDOWN_RETRIES
+        while current_retries < MAX_SHUTDOWN_RETRIES:
+            try:
+                # Close input queue
+                self.input_queue.close()
+
+                logging.info(f"Input queue shutdown")
+
+                # Close control messages input
+                self.keep_reading_ctrl = False
+                self.control_msg_input_thread.join()
+
+                logging.info(f"Control msg input thread shutdown")
+
+                # Close data outputs
+                for data_output in self.data_output_exchanges:
+                    data_output.close()
+
+                logging.info(f"Successful shutdown")
+
+            except:
+                retry_time = self.__get_shutdown_retry_backoff(current_retries)
+                time.sleep(retry_time)
+                current_retries += 1
+
 
     def process_messsage(self, message, ack, nack):
         logging.info("Received top")
