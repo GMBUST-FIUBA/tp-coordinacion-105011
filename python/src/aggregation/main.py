@@ -3,6 +3,7 @@ import logging
 import bisect
 import signal
 import time
+import collections
 
 from common import middleware, message_protocol, fruit_item
 
@@ -31,6 +32,11 @@ class AggregationFilter:
         self.fruit_top = []
         self.sender_id = None
         self.eof_received = False
+        self.total_eof_received = 0
+
+        # Set buffer for incoming messages from other clients
+        self.next_clients_messages_pos_in_buffer = {}
+        self.next_clients_messages_buffer = collections.deque()
 
         # Assign signal handlers
         signal.signal(signalnum=signal.SIGTERM, handler=self._sigterm_handler)
@@ -40,6 +46,7 @@ class AggregationFilter:
         self.fruit_stored = {}
         self.sender_id = None
         self.eof_received = False
+        self.total_eof_received = 0
 
     # Correctly add first fruit record
     def __add_first_fruit_record(self, sender_id, fruit, amount):
@@ -51,6 +58,24 @@ class AggregationFilter:
         self.fruit_stored[fruit] = self.fruit_stored.get(fruit, fruit_item.FruitItem(fruit, 0)) + fruit_item.FruitItem(fruit, amount)
         self.eof_received = False
 
+    # Store message from another client in buffer
+    def __store_other_client_message(self, msg_parts):
+        sender_id = msg_parts[0]
+
+        # If sender is sending the first message
+        if sender_id not in self.next_clients_messages_pos_in_buffer:
+            # Store position of messages to sender ID
+            new_pos = len(self.next_clients_messages_pos_in_buffer.keys())
+            self.next_clients_messages_pos_in_buffer[sender_id] = new_pos
+
+            # Add message
+            self.next_clients_messages_buffer.append([msg_parts])
+        else:
+            # The sender already sent a message, so get position in buffer and store message in order
+            pos_in_buffer = self.next_clients_messages_pos_in_buffer[sender_id]
+            self.next_clients_messages_buffer[pos_in_buffer].append(msg_parts)
+
+
     # Process message gotten from sum
     def _process_data(self, sender_id, fruit, amount):
         logging.info(f"Processing data message: {sender_id}, {fruit}, {amount}")
@@ -60,19 +85,9 @@ class AggregationFilter:
             logging.info(f"Nuevo cliente: {sender_id}")
             self.__add_first_fruit_record(sender_id, fruit, amount)
 
-        elif self.sender_id == sender_id:
+        else:
             # Fruit record has to be added correctly
             self.__add_fruit_record(fruit, amount)
-
-        else:
-            # If an EOF was detected then send top to joiner and add record to empty storage
-            # Otherwise, ignore it
-            if self.eof_received:
-                # Send top to joiner
-                self._send_fruits_top()
-
-                # Add record from new client
-                self.__add_first_fruit_record(sender_id, fruit, amount)
 
 
     def _send_fruits_top(self):
@@ -91,9 +106,32 @@ class AggregationFilter:
         # Restore storage to accept new client data
         self._reset_storage()
 
+    def _send_top_and_accept_next_client_data(self, msg_parts):
+        # Send top to joiner
+        self._send_fruits_top()
+
+        # Add record from new client
+        self.__store_other_client_message(msg_parts)
+
+        # Process next client
+
+        ## Change all positions stored for buffer
+        for id in self.next_clients_messages_pos_in_buffer:
+            self.next_clients_messages_pos_in_buffer[id] -= 1
+
+        ## Iterate over stored messages
+        next_client_messages = self.next_clients_messages_buffer.popleft()
+
+        for fields in next_client_messages:
+            if len(fields) == 3:
+                self._process_data(*fields)
+            elif len(fields) == 1:
+                self._process_eof(*fields)
+
     def _process_eof(self, sender_id):
         logging.info(f"Processing EOF")
-        if self.sender_id == sender_id:
+        self.total_eof_received += 1
+        if self.total_eof_received == SUM_AMOUNT:
             self.eof_received = True
 
     # Sigterm handler
@@ -134,14 +172,23 @@ class AggregationFilter:
                 self._send_fruits_top()
         else:
             fields = message_protocol.internal.deserialize(message)
-            if len(fields) == 3:
-                self._process_data(*fields)
-                ack()
-            elif len(fields) == 1:
-                self._process_eof(*fields)
-                ack()
+            sender_id = fields[0]
+            if self.sender_id is None or sender_id == self.sender_id:
+                if len(fields) == 3:
+                    self._process_data(*fields)
+                    ack()
+                elif len(fields) == 1:
+                    self._process_eof(*fields)
+                    ack()
+                else:
+                    nack()
             else:
-                nack()
+                # Si ya se recibieron todos los EOF, enviar los datos y procesar los de este cliente
+                if self.eof_received is True:
+                    self._send_top_and_accept_next_client_data(fields)
+                else:
+                    # Si todavía se espera el EOF de algún sumador, almacenar el mensaje
+                    self.__store_other_client_message(fields)
 
     def start(self):
         INACTIVITY_TIMEOUT_SECS = 1
