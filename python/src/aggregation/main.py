@@ -35,6 +35,7 @@ class AggregationFilter:
         self.total_eof_received = 0
 
         # Set buffer for incoming messages from other clients
+        self.next_client = None
         self.next_clients_messages_pos_in_buffer = {}
         self.next_clients_messages_buffer = collections.deque()
 
@@ -64,16 +65,20 @@ class AggregationFilter:
 
         # If sender is sending the first message
         if sender_id not in self.next_clients_messages_pos_in_buffer:
+            # Add next client if needed
+            if self.next_client is None:
+                self.next_client = sender_id
+
             # Store position of messages to sender ID
             new_pos = len(self.next_clients_messages_pos_in_buffer.keys())
             self.next_clients_messages_pos_in_buffer[sender_id] = new_pos
 
             # Add message
-            self.next_clients_messages_buffer.append([msg_parts])
+            self.next_clients_messages_buffer.append([msg_parts[1:]])
         else:
             # The sender already sent a message, so get position in buffer and store message in order
             pos_in_buffer = self.next_clients_messages_pos_in_buffer[sender_id]
-            self.next_clients_messages_buffer[pos_in_buffer].append(msg_parts)
+            self.next_clients_messages_buffer[pos_in_buffer].append(msg_parts[1:])
 
 
     # Process message gotten from sum
@@ -116,20 +121,27 @@ class AggregationFilter:
         # Process next client
 
         ## Remove next client ID from waiting list
-        self.next_clients_messages_pos_in_buffer.pop(msg_parts[0])
-
-        ## Change all positions stored for buffer
-        for id in self.next_clients_messages_pos_in_buffer:
-            self.next_clients_messages_pos_in_buffer[id] -= 1
+        self.next_clients_messages_pos_in_buffer.pop(self.next_client)
 
         ## Iterate over stored messages
         next_client_messages = self.next_clients_messages_buffer.popleft()
 
-        for fields in next_client_messages:
+        for msg_args in next_client_messages:
+            fields = [self.next_client] + msg_args
             if len(fields) == 3:
                 self._process_data(*fields)
             elif len(fields) == 1:
                 self._process_eof(*fields)
+
+        ## Change all positions stored for buffer
+        self.next_client = None
+        for id in self.next_clients_messages_pos_in_buffer:
+            self.next_clients_messages_pos_in_buffer[id] -= 1
+
+            # Set new next client to handle
+            if self.next_clients_messages_pos_in_buffer[id] == 0:
+                self.next_client = id
+
 
     def _process_eof(self, sender_id):
         logging.info(f"Processing EOF")

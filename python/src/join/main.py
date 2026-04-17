@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -23,6 +24,9 @@ class JoinFilter:
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
+
+        # Assign sigterm handler
+        signal.signal(signalnum=signal.SIGTERM, handler=self._sigterm_handler)
 
     # Sigterm handler
     def _sigterm_handler(self, signum, frame):
