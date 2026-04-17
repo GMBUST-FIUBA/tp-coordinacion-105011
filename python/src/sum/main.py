@@ -135,8 +135,6 @@ class SumFilter:
             logging.info(f"Sending EOF message to aggregator {dest_agg}")
             self.data_output_exchanges[dest_agg].send(message_protocol.internal.serialize([sender_id]))
 
-            time.sleep(1)
-
     # Process EOF
     # Sends EOF to the rest of the sums
     def _process_eof(self, sender_id):
