@@ -19,6 +19,8 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 
 class AggregationFilter:
 
+    MAX_NEW_CLIENTS_MESSAGES = 20
+
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{ID}"]
@@ -38,6 +40,7 @@ class AggregationFilter:
         self.next_client = None
         self.next_clients_messages_pos_in_buffer = {}
         self.next_clients_messages_buffer = collections.deque()
+        self.total_stored_msgs = 0
 
         # Assign signal handlers
         signal.signal(signalnum=signal.SIGTERM, handler=self._sigterm_handler)
@@ -60,7 +63,13 @@ class AggregationFilter:
         self.eof_received = False
 
     # Store message from another client in buffer
-    def __store_other_client_message(self, msg_parts):
+    def __store_other_client_message(self, msg_parts, change_of_client=False):
+
+        if change_of_client is False and self.total_stored_msgs == self.MAX_NEW_CLIENTS_MESSAGES:
+            logging.info(f"ERROR: Too many messages stored")
+            self.shutdown()
+            raise Exception("Too many messages stored")
+
         sender_id = msg_parts[0]
 
         # If sender is sending the first message
@@ -79,6 +88,9 @@ class AggregationFilter:
             # The sender already sent a message, so get position in buffer and store message in order
             pos_in_buffer = self.next_clients_messages_pos_in_buffer[sender_id]
             self.next_clients_messages_buffer[pos_in_buffer].append(msg_parts[1:])
+
+        # Store total current stored messages
+        self.total_stored_msgs += 1
 
 
     # Process message gotten from sum
