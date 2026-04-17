@@ -115,6 +115,9 @@ class AggregationFilter:
 
         # Process next client
 
+        ## Remove next client ID from waiting list
+        self.next_clients_messages_pos_in_buffer.pop(msg_parts[0])
+
         ## Change all positions stored for buffer
         for id in self.next_clients_messages_pos_in_buffer:
             self.next_clients_messages_pos_in_buffer[id] -= 1
