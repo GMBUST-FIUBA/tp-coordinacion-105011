@@ -65,7 +65,7 @@ class AggregationFilter:
     # Store message from another client in buffer
     def __store_other_client_message(self, msg_parts, change_of_client=False):
 
-        if change_of_client is False and self.total_stored_msgs == self.MAX_NEW_CLIENTS_MESSAGES:
+        if change_of_client is False and self.total_stored_msgs >= self.MAX_NEW_CLIENTS_MESSAGES:
             logging.info(f"ERROR: Too many messages stored")
             self.shutdown()
             raise Exception("Too many messages stored")
@@ -128,7 +128,7 @@ class AggregationFilter:
         self._send_fruits_top()
 
         # Add record from new client
-        self.__store_other_client_message(msg_parts)
+        self.__store_other_client_message(msg_parts, change_of_client=True)
 
         # Process next client
 
@@ -137,6 +137,7 @@ class AggregationFilter:
 
         ## Iterate over stored messages
         next_client_messages = self.next_clients_messages_buffer.popleft()
+        self.total_stored_msgs -= len(next_client_messages)
 
         for msg_args in next_client_messages:
             fields = [self.next_client] + msg_args
