@@ -111,12 +111,34 @@ Para poder identificar el cliente que envió los mensajes se le definió a cada 
 
 ## Sum
 
-Se identificó como problema al aumentar la cantidad de réplicas que, al enviar que se terminaron los registros de frutas, solo uno de los procesos *Sum* o *sumadores* recibiría el mensaje mientras que los demás no se enterarían de ello. Por eso se creó un exchange de mensajes de control para avisar a las demás instancias de cosas a realizar, como saber que existió un *End of records*. Cada registro de frutas y cantidades es almacenado por identificador y sumado utilizando la interfaz provista.
+### Comunicación entre sumadores
 
-Una vez que se determina el fin de la transmisión de los clientes, que viene dada por la lectura de tantos *End of records* como *sumadores*, se envían los datos a los *Aggregator*. El *Aggregator* a utilizar se decide al aplicarle la operación *mod* al identificador UUID del cliente que viene en los mensajes, aprovechando que todos los *Sum* generan la lista de *Aggregator* de la misma forma. Por ejemplo, si el identificador es 10 y hay 3 *Aggregator* se calcula `10 mod 3` que es igual a `1` con lo que el *Aggregator* con ese valor es el utilizado. De esta forma todos los *Sum* enviarán los datos del mismo cliente al mismo *Aggregator*.
+Se identificó como problema al aumentar la cantidad de réplicas que, al enviar que se terminaron los registros de frutas, solo uno de los procesos *Sum* o *sumadores* recibiría el mensaje mientras que los demás no se enterarían de ello. Por eso se creó un exchange de mensajes de control para avisar a las demás instancias de cosas a realizar, como saber que existió un *End of records*. Cada registro de frutas y cantidades es almacenado por identificador y sumado utilizando la interfaz provista.
 
 Una particularidad de los *sumadores* es que utilizan el módulo **threading** para ejecutar un hilo y leer los comandos de los demás *sumadores* cuando lleguen los mismos. Esto no es un problema a pesar del GIL ya que se realizan únicamente operaciones de I/O y la mayor parte del tiempo el hilo permanece bloqueado por esperar un mensaje de control de los demás *sumadores* (que aparecen únicamente al llegar al final de los datos de cada cliente), con lo que la mayor parte del tiempo transcurre en el hilo principal del sumador donde se toman datos y se procesan.
 
+### Elección de agregador
+
+Una vez que se determina el fin de la transmisión de los datos por parte de los clientes, que viene dada por la lectura de tantos *End of records* y la falta de recepción de datos, se envían los resultados parciales a los *Aggregator*. El *Aggregator* a utilizar se decide al aplicarle la operación *mod* al identificador UUID del cliente que viene en los mensajes. Por ejemplo, si el identificador es 10 y hay 3 *Aggregator* se calcula `10 mod 3` que es igual a `1` con lo que el *Aggregator* con ese prefijo es el utilizado. De esta forma todos los *Sum* enviarán los datos del mismo cliente al mismo *Aggregator*. Para cada uno de los *agregadores* se usa un proceso particular en el *sumador* para que el envío de datos sea paralelizable.
+
+Ahora bien, para poder coordinar el envío de los datos de un determinado cliente a un *agregador* entre dos clientes se decide utilizando la comunicación en *exchange* entre los *sumadores* mencionada antes definiendo un orden de envío entre todos los clientes. Como todos los *sumadores* reciben el mismo mensaje una vez que RabbitMQ decide enviarlo a los suscriptores, se puede enviar un mensaje con el cliente que llega al fin de los datos y se envía a todos los *sumadores*, que almacenan dichos clientes por orden de llegada, y como siempre se envían en el mismo orden a todos los *sumadores* se puede obtener un orden entre todos utilizando el orden de recepción de los mensajes.
+
+#### Ejemplo
+
+Por ejemplo, dados dos clientes A y B envían datos a dos *sumadores* S1 y S2:
+
+  1) A envía un EOF que es recibido por S1.
+  2) S1 envía el EOF de A a S2 y guarda en una cola que el EOF de A llegó. Si antes estaba vacía, resulta `[A]`.
+  3) S2 recibe el EOF de A y lo guarda en una cola, que si estaba vacía es también `[A]`.
+  4) B envía un EOF que es recibido por S2.
+  5) S2 envía el EOF de B a S1 y guarda en una cola que el EOF de B llegó. La cola resulta siendo `[A, B]`.
+  6) S1 recibe el EOF de B y lo guarda en una cola que termina siendo `[A, B]`.
+
+De esta forma se forma un orden "global" entre los clientes a medida que llegan los EOF.
+
+Supóngase que ahora hay 4 clientes y que la cola de orden global resulta `[A, B, C, D]`, hay dos *sumadores* y 2 *agregadores*. Suponiendo que todos los *sumadores* tienen datos de todos los clientes, entonces se deben elegir no solo los *agregadores* a donde enviar los datos de cada cliente, porque cada *agregador* maneja los datos de un solo cliente a la vez, si no que tambien hace falta saber el orden de los clientes de los que se envían los datos a los *agregadores*.
+
+Aprovechando que los *routing keys* de los exchanges de salida son de la forma "{NOMBRE}_{PREFIJO}" y que el prefijo va de 0 a *N-1* (si hay *N* *agregadores*) se hizo lo siguiente: si el orden global entre *sumadores* es `[A, B, C, D]`, siguiendo con el nuevo ejemplo, se calcula un hash que se acota con la función *mod*, como se explicó antes, y se obtiene en este caso un *0* o un *1*. Supóngase que el cálculo resultó en 0 para *A* y *D* y 1 para *B* y *C*, entonces se arman dos procesos en cada *sumador*, para los *agregadores* con prefijos 0 y 1, y se les pasa a la lista `[A, D]` al proceso del agregador con prefijo 0 y `[B, C]` al proceso del agregador con prefijo 1 (notar que el orden entre los elementos se mantiene del orden "global"). Entonces en cada sumador al *agregador* de prefijo 0 se le envían los datos del cliente *A* y luego *D*, mientras que al *agregador* de prefijo 1 se le envían los datos del cliente *B* y luego del cliente *C*.
 
 ## Aggregator
 
