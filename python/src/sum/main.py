@@ -3,9 +3,9 @@ import signal
 import logging
 import threading
 import time
-import random
 import uuid
 import collections
+import multiprocessing
 
 from common import middleware, message_protocol, fruit_item
 
@@ -109,19 +109,26 @@ class SumFilter:
             fruit, fruit_item.FruitItem(fruit, 0)
         ) + fruit_item.FruitItem(fruit, int(amount))
 
-    # Send data to aggregation stage
-    def _send_data_to_aggregation(self):
-        logging.info(f"Distribuiting data messages")
+    def __get_sender_aggregator(sender_id):
+        sender_id_uuid = uuid.UUID(sender_id)
+        return sender_id_uuid.int % AGGREGATION_AMOUNT
+    
+    def _send_data_to_aggregation_in_thread(args_for_worker):
+        # Initial configuration for worker
+        dest_agg = args_for_worker[0]
+        args_by_client = args_for_worker[1]
+        data_output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{dest_agg}"])
 
-        # For every sender in order
-        for sender_id in self.agg_sending_order:
-            # Get aggregator to send records
-            sender_id_uuid = uuid.UUID(sender_id)
-            dest_agg = sender_id_uuid.int % AGGREGATION_AMOUNT
+        # For each client
+        for args in args_by_client:
+            sender_id = args["sender_id"]
+            sum_records = args["sum_records"]
 
-            # Send data
-            for final_fruit_item in self.fruits_by_id[sender_id].values():
-                self.data_output_exchanges[dest_agg].send(
+            # Send each fruit sum record
+            logging.info(f"Sending data of client {sender_id} to aggregator {dest_agg}")
+
+            for final_fruit_item in sum_records.values():
+                data_output_exchange.send(
                     message_protocol.internal.serialize(
                         [sender_id, final_fruit_item.fruit, final_fruit_item.amount]
                     )
@@ -129,7 +136,37 @@ class SumFilter:
 
             # Send EOF
             logging.info(f"Sending EOF message to aggregator {dest_agg}")
-            self.data_output_exchanges[dest_agg].send(message_protocol.internal.serialize([sender_id]))
+            data_output_exchange.send(message_protocol.internal.serialize([sender_id]))
+
+        # Close exchange when leaving
+        data_output_exchange.close()
+
+
+    # Send data to aggregation stage
+    def _send_data_to_aggregation(self):
+        logging.info(f"Distribuiting data messages")
+
+        # Get sender workers data
+        sender_workers_args_by_agg = {}
+        for sender_id in self.agg_sending_order:
+            dest_agg = SumFilter.__get_sender_aggregator(sender_id)
+
+            if dest_agg not in sender_workers_args_by_agg:
+                sender_workers_args_by_agg[dest_agg] = []
+
+            sum_results = self.fruits_by_id.get(sender_id, {})
+
+            # Join arguments for worker in dictionary
+            worker_args = {
+                "sender_id" : sender_id,
+                "sum_records" : sum_results,
+            }
+            sender_workers_args_by_agg[dest_agg].append(worker_args)
+
+        # Create processes for sending data to aggregators
+        with multiprocessing.Pool(processes=AGGREGATION_AMOUNT) as pool:
+            pool.map(func=SumFilter._send_data_to_aggregation_in_thread, iterable=sender_workers_args_by_agg.items())
+
 
     # Process EOF
     # Sends EOF to the rest of the sums
