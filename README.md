@@ -96,6 +96,14 @@ Se realiza la implementación del Trabajo Práctico de coordinación dado por la
 
 El trabajo se realizará en Python ya que el Trabajo Práctico de MOM fue realizado en dicho lenguaje y se busca reutilizar dicho código.
 
+## Suposiciones
+
+A continuación se colocan las suposiciones que se toman para el desarrollo del sistema:
+
+- No se agregan datos adicionales luego de que cada cliente envía todos los datos iniciales.
+- No se caen las conexiones entre los componentes (procesos) del sistema.
+
+
 ## Message handler de cliente
 
 Para poder identificar el cliente que envió los mensajes se le definió a cada clase de *MessageHandler* un identificador único. Este identificador se decidió que sería el UUID versión 4 por generar un identificador prácticamente único y porque es fácilmente escalable. Si bien se debe incurrir a un costo de transmisión considerable enviando una gran cantidad de bits esto puede ser en parte solventado utilizando métodos de procesamiento de a grandes cantidades (*batchs*), aunque eso queda por fuera del alcance de este proyecto. Este identificador, que se llamará *identificador del cliente*, se enviará en cada mensaje del message handler del cliente a los *Sum*.
