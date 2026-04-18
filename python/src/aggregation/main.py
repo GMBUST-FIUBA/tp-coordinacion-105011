@@ -19,7 +19,7 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 
 class AggregationFilter:
 
-    MAX_NEW_CLIENTS_MESSAGES = 20
+    MAX_NEW_CLIENTS_MESSAGES = 40
 
     def __init__(self):
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
