@@ -18,9 +18,13 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 class JoinFilter:
 
     def __init__(self):
+        # Create input queue
+        INPUT_QUEUE_PREFETCH_COUNT = 5
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, INPUT_QUEUE
+            MOM_HOST, INPUT_QUEUE, prefetch_count=INPUT_QUEUE_PREFETCH_COUNT
         )
+
+        # Create output queue
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )

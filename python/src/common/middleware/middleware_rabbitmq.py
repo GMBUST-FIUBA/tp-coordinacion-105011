@@ -5,7 +5,7 @@ from .middleware import MessageMiddlewareQueue, MessageMiddlewareExchange, Messa
 
 class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
-    def __init__(self, host, queue_name):
+    def __init__(self, host, queue_name, prefetch_count=1):
         # Iniciar conexión con broker de RabbitMQ
         self._connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
         self._queue = self._connection.channel()
@@ -13,7 +13,7 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
         # Inicializar cola
         self._queue_name = queue_name
         self._queue.queue_declare(queue=queue_name)
-        self._queue.basic_qos(prefetch_count=1)
+        self._queue.basic_qos(prefetch_count=prefetch_count)
         self._queue.confirm_delivery()
         self._is_consuming = False
     
@@ -90,7 +90,7 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
 
 class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
     
-    def __init__(self, host, exchange_name, routing_keys):
+    def __init__(self, host, exchange_name, routing_keys, prefetch_count=0):
         # Iniciar conexión
         self._connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
         self._channel = self._connection.channel()
@@ -100,6 +100,7 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
         self._host = host
         self._routing_keys = routing_keys
         self._channel.exchange_declare(exchange=self._exchange_name, exchange_type='direct')
+        self._channel.basic_qos(prefetch_count=prefetch_count)
         self._channel.confirm_delivery()
         self._is_consuming = False
 

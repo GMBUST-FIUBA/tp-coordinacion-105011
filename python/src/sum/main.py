@@ -32,8 +32,12 @@ class SumFilter:
         )
 
         # Create sums control exchanges
+        PREFETCH_COUNT_SUM_CONTROL_RX = 5
+
         self.control_exchange_sender = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
-        self.control_exchange_receiver = middleware.MessageMiddlewareExchangeRabbitMQ(MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY])
+        self.control_exchange_receiver = middleware.MessageMiddlewareExchangeRabbitMQ(
+            MOM_HOST, SUM_CONTROL_EXCHANGE, [SUM_CONTROL_EXCHANGE_KEY], prefetch_count=PREFETCH_COUNT_SUM_CONTROL_RX
+            )
 
         # Lock to control the last control message
         self.last_ctrl_message_lock = threading.Lock()
@@ -45,13 +49,7 @@ class SumFilter:
         # Store order of EOF received
         self.agg_sending_order = collections.deque()
 
-        # Create output exchanges
-        self.data_output_exchanges = []
-        for i in range(AGGREGATION_AMOUNT):
-            data_output_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-                MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{i}"]
-            )
-            self.data_output_exchanges.append(data_output_exchange)
+        # Stored partial sums by client
         self.fruits_by_id = {}
 
         # Assign signal handlers
@@ -228,10 +226,6 @@ class SumFilter:
                 self.control_msg_input_thread.join()
 
                 logging.info(f"Control msg input thread shutdown")
-
-                # Close data outputs
-                for data_output in self.data_output_exchanges:
-                    data_output.close()
 
                 logging.info(f"Successful shutdown")
 

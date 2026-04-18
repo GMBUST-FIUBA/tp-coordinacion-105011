@@ -22,9 +22,13 @@ class AggregationFilter:
     MAX_NEW_CLIENTS_MESSAGES = 40
 
     def __init__(self):
+        # Create input exchange
+        INPUT_EXCHANGE_PREFETCH_COUNT = 5
         self.input_exchange = middleware.MessageMiddlewareExchangeRabbitMQ(
-            MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{ID}"]
+            MOM_HOST, AGGREGATION_PREFIX, [f"{AGGREGATION_PREFIX}_{ID}"], prefetch_count=INPUT_EXCHANGE_PREFETCH_COUNT
         )
+
+        # Create output queue
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
@@ -217,6 +221,7 @@ class AggregationFilter:
                 else:
                     # Si todavía se espera el EOF de algún sumador, almacenar el mensaje
                     self.__store_other_client_message(fields)
+                ack()
 
     def start(self):
         INACTIVITY_TIMEOUT_SECS = 1
