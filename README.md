@@ -102,6 +102,7 @@ A continuación se colocan las suposiciones que se toman para el desarrollo del 
 
 - No se agregan datos adicionales luego de que cada cliente envía todos los datos iniciales.
 - No se caen las conexiones entre los componentes (procesos) del sistema.
+- Se toman valores de prefetch de RabbitMQ pequeños (del orden de 5) sobretodo para evitar desbalanceo de carga de trabajo en las colas y para que sigan habiendo siempre mensajes disponibles, y en los exchange para que haya siempre un mensaje descargándose, sobre todo en las etapas finales del *pipeline* donde los mensajes pueden ser de gran tamaño.
 
 
 ## Message handler de cliente
