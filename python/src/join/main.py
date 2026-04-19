@@ -51,16 +51,9 @@ class JoinFilter:
                 self.input_queue.close()
 
                 logging.info(f"Input queue shutdown")
-
-                # Close control messages input
-                self.keep_reading_ctrl = False
-                self.control_msg_input_thread.join()
-
-                logging.info(f"Control msg input thread shutdown")
-
+                
                 # Close data outputs
-                for data_output in self.data_output_exchanges:
-                    data_output.close()
+                self.output_queue.close()
 
                 logging.info(f"Successful shutdown")
                 break
