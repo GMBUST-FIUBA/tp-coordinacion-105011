@@ -46,6 +46,10 @@ class SumFilter:
         # Control to say if data was stored and sent
         self.data_was_sent = False
 
+        # Control to make the control thread keep reading
+        self.keep_reading_ctrl = threading.Event()
+        self.keep_reading_ctrl.set()
+
         # Store order of EOF received
         self.agg_sending_order = collections.deque()
 
@@ -62,9 +66,8 @@ class SumFilter:
     def _read_control_message(self):
         logging.info(f"Input ctrl: start")
         INACTIVITY_TIMEOUT = 1.0
-        self.keep_reading_ctrl = True
 
-        while self.keep_reading_ctrl:
+        while self.keep_reading_ctrl.is_set():
             logging.info(f"Input ctrl: start consuming")
             self.control_exchange_receiver.start_consuming(on_message_callback=self.__control_message_callback, inactivity_timeout=INACTIVITY_TIMEOUT)
 
@@ -83,7 +86,7 @@ class SumFilter:
                         self.agg_sending_order.append(split_msg[1])
                         self.last_ctrl_message = SumControl.EOF_RECV
                 ack()
-            elif not self.keep_reading_ctrl:
+            elif not self.keep_reading_ctrl.is_set():
                 self.control_exchange_receiver.stop_consuming()
                 logging.info(f"Input ctrl: shutdown")
         except:
@@ -222,7 +225,7 @@ class SumFilter:
                 logging.info(f"Input queue shutdown")
 
                 # Close control messages input
-                self.keep_reading_ctrl = False
+                self.keep_reading_ctrl.clear()
                 self.control_msg_input_thread.join()
 
                 logging.info(f"Control msg input thread shutdown")
