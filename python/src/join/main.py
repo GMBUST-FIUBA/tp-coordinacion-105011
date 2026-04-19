@@ -63,7 +63,7 @@ class JoinFilter:
                     data_output.close()
 
                 logging.info(f"Successful shutdown")
-                return
+                break
 
             except:
                 retry_time = self.__get_shutdown_retry_backoff(current_retries)
