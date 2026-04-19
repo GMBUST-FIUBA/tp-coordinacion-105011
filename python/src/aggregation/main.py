@@ -167,7 +167,7 @@ class AggregationFilter:
             self.eof_received = True
 
     # Sigterm handler
-    def _sigterm_handler(self):
+    def _sigterm_handler(self, signum, frame):
         self.shutdown()
 
     # Retry backoff when it shutdowns
