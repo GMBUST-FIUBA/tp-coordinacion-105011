@@ -204,12 +204,18 @@ class SumFilter:
             try:
                 # Close input queue
                 self.input_queue.close()
-
                 logging.info(f"Input queue shutdown")
+
+                # Close output exchanges
+                for data_output in self.data_output_exchanges:
+                    data_output.close()
 
                 # Close control messages input
                 self.keep_reading_ctrl.clear()
                 self.control_msg_input_thread.join()
+
+                self.control_exchange_sender.close()
+                self.control_exchange_receiver.close()
 
                 logging.info(f"Control msg input thread shutdown")
 
