@@ -1,9 +1,8 @@
 import os
 import logging
-import bisect
 import signal
 import time
-import collections
+import heapq
 
 from common import middleware, message_protocol, fruit_item
 
@@ -64,14 +63,11 @@ class AggregationFilter:
         fruits_stored = self.__get_client_fruits(sender_id)
 
         fruit_chunk = list(fruits_stored.values())
-        fruit_chunk.sort(reverse=True)
 
-        fruit_top = list(
-            map(
-                lambda fruit_item: (fruit_item.fruit, fruit_item.amount),
-                fruit_chunk[0:TOP_SIZE],
-            )
-        )
+        heapq.heapify_max(fruit_chunk)
+
+        fruit_top = [(item.fruit, item.amount) for item in fruit_chunk]
+
         fruit_top.append(("sender_id", sender_id))
         self.output_queue.send(message_protocol.internal.serialize(fruit_top))
 
