@@ -118,13 +118,18 @@ Se identificó como problema al aumentar la cantidad de réplicas que, al enviar
 
 Una particularidad de los *sumadores* es que utilizan el módulo **threading** para ejecutar un hilo y leer los comandos de los demás *sumadores* cuando lleguen los mismos. Esto no es un problema a pesar del GIL ya que se realizan únicamente operaciones de I/O y la mayor parte del tiempo el hilo permanece bloqueado por esperar un mensaje de control de los demás *sumadores* (que aparecen únicamente al llegar al final de los datos de cada cliente), con lo que la mayor parte del tiempo transcurre en el hilo principal del sumador donde se toman datos y se procesan.
 
-### Elección de agregador
 
-Una vez que se determina el fin de la transmisión de los datos por parte de los clientes, que viene dada por la lectura de tantos *End of records* y la falta de recepción de datos, se envían los resultados parciales a los *Aggregator*. El *Aggregator* a utilizar se decide al aplicarle la operación *mod* al identificador UUID del cliente que viene en los mensajes. Por ejemplo, si el identificador es 10 y hay 3 *Aggregator* se calcula `10 mod 3` que es igual a `1` con lo que el *Aggregator* con ese prefijo es el utilizado. De esta forma todos los *Sum* enviarán los datos del mismo cliente al mismo *Aggregator*. Para cada uno de los *agregadores* se usa un proceso particular en el *sumador* para que el envío de datos sea paralelizable.
+## Envío de datos a agregadores
 
-Ahora bien, para poder coordinar el envío de los datos de un determinado cliente a un *agregador* entre dos clientes se decide utilizando la comunicación en *exchange* entre los *sumadores* mencionada antes definiendo un orden de envío entre todos los clientes. Como todos los *sumadores* reciben el mismo mensaje una vez que RabbitMQ decide enviarlo a los suscriptores, se puede enviar un mensaje con el cliente que llega al fin de los datos y se envía a todos los *sumadores*, que almacenan dichos clientes por orden de llegada, y como siempre se envían en el mismo orden a todos los *sumadores* se puede obtener un orden entre todos utilizando el orden de recepción de los mensajes.
+Una vez que se determina el fin de la transmisión de los datos por parte de los clientes, que viene dada por la lectura de *End of records* y la falta de recepción de datos, se envían los resultados parciales a los *Aggregator*. La función de los *agregadores* es la de recibir todos valores obtenidos por los *sumadores* de determinadas frutas y sumarlos para obtener resultados globales de algunas de las frutas. Luego esos resultados se ordenan de mayor a menor y se toman los `TOP_SIZE` cantidades más grandes que se envían al *joiner*.
 
-#### Ejemplo
+El envío de los datos se maneja de forma tal que los clientes con menos datos son los que primero se procesan. Como todos los *sumadores* reciben el mismo mensaje de control una vez que RabbitMQ decide enviarlo a los suscriptores, se puede enviar un mensaje con el cliente que llega al fin de los datos y se envía a todos los *sumadores*, que almacenan dichos clientes por orden de llegada, y como siempre se envían en el mismo orden a todos los *sumadores* se puede obtener un orden entre todos utilizando el orden de recepción de los mensajes. Ahora bien, esto favorece a los clientes con menos datos ya que son los primeros en enviar el *EOF* y en consecuencia los primeros en propagar sus *EOF* en el sistema.
+
+Una vez obtenido el orden de envío de los datos se procede a enviar los datos. Los *sumadores* se conectan a los agregadores de la misma forma y en el mismo orden con lo que solo es necesario coordinar entre los distintos *sumadores* los datos a enviar a cada *agregador*. Esto se hace aplicándole un *hash* al nombre de la fruta y luego acotándolo según la cantidad de *agregadores* usando el resto de la división entera. De esta forma siempre a cada número entre 0 y *N-1* (habiendo *N* agregadores) puede asociarse para todos los *sumadores* a un mismo agregador.
+
+### Ejemplos
+
+#### Envío de EOFs
 
 Por ejemplo, dados dos clientes A y B envían datos a dos *sumadores* S1 y S2:
 
@@ -137,12 +142,29 @@ Por ejemplo, dados dos clientes A y B envían datos a dos *sumadores* S1 y S2:
 
 De esta forma se forma un orden "global" entre los clientes a medida que llegan los EOF.
 
-Supóngase que ahora hay 4 clientes y que la cola de orden global resulta `[A, B, C, D]`, hay dos *sumadores* y 2 *agregadores*. Suponiendo que todos los *sumadores* tienen datos de todos los clientes, entonces se deben elegir no solo los *agregadores* a donde enviar los datos de cada cliente, porque cada *agregador* maneja los datos de un solo cliente a la vez, si no que tambien hace falta saber el orden de los clientes de los que se envían los datos a los *agregadores*.
+#### Envío de datos a agregadores
 
-Aprovechando que los *routing keys* de los exchanges de salida son de la forma "{NOMBRE}_{PREFIJO}" y que el prefijo va de 0 a *N-1* (si hay *N* *agregadores*) se hizo lo siguiente: si el orden global entre *sumadores* es `[A, B, C, D]`, siguiendo con el nuevo ejemplo, se calcula un hash que se acota con la función *mod*, como se explicó antes, y se obtiene en este caso un *0* o un *1*. Supóngase que el cálculo resultó en 0 para *A* y *D* y 1 para *B* y *C*, entonces se arman dos procesos en cada *sumador*, para los *agregadores* con prefijos 0 y 1, y se les pasa a la lista `[A, D]` al proceso del agregador con prefijo 0 y `[B, C]` al proceso del agregador con prefijo 1 (notar que el orden entre los elementos se mantiene del orden "global"). Entonces en cada sumador al *agregador* de prefijo 0 se le envían los datos del cliente *A* y luego *D*, mientras que al *agregador* de prefijo 1 se le envían los datos del cliente *B* y luego del cliente *C*.
+Supóngase que ahora hay 4 clientes y que la cola de orden global resulta `[A, B, C, D]`, hay dos *sumadores* y dos *agregadores*. Suponiendo que todos los *sumadores* tienen datos de todos los clientes, entonces se deben elegir qué datos enviar a qué *agregadores*.
+
+Aprovechando que los *routing keys* de los exchanges de salida son de la forma "{NOMBRE}_{PREFIJO}" y que el prefijo va de 0 a *N-1* (si hay *N* *agregadores*) se hizo lo siguiente: para cada dato de cada cliente se calculará `HASH(${NOMBRE_FRUTA}) % ${NUMERO_AGREGADORES}` y el número que resulte representará uno de los *agregadores*. De esa forma se concentran determinados datos en determinados *agregadores*.
+
+Entonces se recorre la lista en cada *sumador*:
+
+1) Se toman los datos del cliente *A*, que serían las frutas con sus montos, y para cada nombre de fruta `HASH(${NOMBRE_FRUTA}) % ${NUMERO_AGREGADORES}`. Por ejempĺo las manzanas irán al *agregador* número 0 y las naranjas al *agregador* número 1.
+2) Se toman los datos del cliente *B* y para cada nombre de fruta se calcula `HASH(${NOMBRE_FRUTA}) % ${NUMERO_AGREGADORES}` y por ejempĺo las manzanas irán nuevamente al *agregador* número 0 y las peras también.
+3) Se toman los datos del cliente *C* y para cada nombre de fruta se calcula `HASH(${NOMBRE_FRUTA}) % ${NUMERO_AGREGADORES}` y por ejempĺo las peras irán nuevamente al *agregador* número 1 y las uvas también.
+3) Por último se toman los datos del cliente *D* y para cada nombre de fruta se calcula `HASH(${NOMBRE_FRUTA}) % ${NUMERO_AGREGADORES}`, y puede resultar que las peras irán nuevamente al *agregador* número 1 y las manzanas al *agregador* número 0 nuevamente.
+
+En resumen, se usan funciones de *hash* para determinar los agregadores de cada fruta.
+
 
 ## Aggregator
 
-Los *Aggregator* o *agregadores* son los encargados de reunir los resultados parciales de los *sumadores* y unirlos entre sí para llegar al resultado total que el cliente necesita. Los agregadores, por lo que se explicó antes, reciben siempre datos del mismo cliente y los unen para poder obtener el resultado de cantidades final. El resultado final se sabe que se obtuvo cuando todos los sumadores enviaron
+Los *Aggregator* o *agregadores* son los encargados de reunir los resultados parciales de los *sumadores* y unirlos entre sí para llegar al resultado total que el cliente necesita. Los agregadores, por lo que se explicó antes, reciben siempre los datos de determinadas frutas y los unen para poder obtener el resultado de cantidades final. Se sabe que se obtuvieron todos los datos cuando todos los sumadores enviaron los *EOF* de cada cliente según el orden global.
 
-Puede ocurrir que los *sumadores* decidan enviar al mismo *agregador* que ya estaban enviando y que no se hayan recibido los *EOF* de todos los *sumadores* aún, pero para estos casos el *agregador* guarda los mensajes que envían los *sumadores* de otros clientes a la espera de que llegue el *EOF* *sumador* hasta un límite, en cuyo caso el *agregador* reconoce que se perdió la conexión con un *sumador*.
+Los *agregadores* reciben los datos de los sumadores sin importar el cliente y una vez que reciben todos los *EOF* envían las `TOP_SIZE` frutas con mayores cantidades al *joiner* para que sea él quien una por último los resultados parciales de todos los *agregadores*. Esto se hace porque al no tener información de las demás instancias, no es posible determinar *a priori* si se posee una o más de las mayores cantidades.
+
+
+## Joiner
+
+Es el encargado de juntar los resultados parciales de los *agregadores* y enviarlos a los clientes. Su único trabajo es esperar a que todos los *agregadores* envíen los datos de todos los clientes que solicitaron trabajos al sistema.

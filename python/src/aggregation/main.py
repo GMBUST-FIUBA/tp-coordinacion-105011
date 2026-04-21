@@ -19,8 +19,6 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 
 class AggregationFilter:
 
-    MAX_NEW_CLIENTS_MESSAGES = 40
-
     def __init__(self):
         # Create input exchange
         INPUT_EXCHANGE_PREFETCH_COUNT = 5
