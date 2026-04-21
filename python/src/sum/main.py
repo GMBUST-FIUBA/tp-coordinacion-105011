@@ -150,6 +150,9 @@ class SumFilter:
                     )
                 )
 
+            # Delete the sent fruits
+            if sender_id in self.fruits_by_id:
+                del self.fruits_by_id[sender_id]
 
 
     # Process EOF

@@ -129,7 +129,6 @@ class AggregationFilter:
                 nack()
 
     def start(self):
-        INACTIVITY_TIMEOUT_SECS = 1
         self.input_exchange.start_consuming(self.process_messsage)
 
 
