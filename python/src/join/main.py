@@ -20,9 +20,8 @@ class JoinFilter:
 
     def __init__(self):
         # Create input queue
-        INPUT_QUEUE_PREFETCH_COUNT = 5
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
-            MOM_HOST, INPUT_QUEUE, prefetch_count=INPUT_QUEUE_PREFETCH_COUNT
+            MOM_HOST, INPUT_QUEUE, prefetch_count=TOTAL_PARTIAL_TOPS_ACCEPTED
         )
 
         # Create output queue
